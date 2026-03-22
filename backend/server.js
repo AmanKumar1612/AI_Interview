@@ -8,6 +8,8 @@ if (keysOk) console.log(`✅ LLM provider ready: ${(process.env.LLM_PROVIDER || 
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 
 // ── Routes ───────────────────────────────────────────────────────────────────
@@ -22,34 +24,67 @@ const app = express();
 // ── Connect to MongoDB ───────────────────────────────────────────────────────
 connectDB();
 
+// ── Security Headers (Helmet) ─────────────────────────────────────────────────
+app.use(helmet());
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const isDev = (process.env.NODE_ENV || 'development') === 'development';
+
+const allowedOrigins = [
+    ...(isDev ? [] : []),               // dev origins handled via regex below
+    process.env.CLIENT_URL,             // e.g. https://ai-voice-interview.vercel.app
+    'https://ai-voice-interview.vercel.app',
+].filter(Boolean);
 
 app.use(
     cors({
         origin: (origin, callback) => {
-            // Allow requests with no origin (mobile apps, curl, Postman)
-            if (!origin) return callback(null, true);
+            // Block no-origin requests in production (server-to-server, scrapers)
+            if (!origin) {
+                if (isDev) return callback(null, true);
+                return callback(new Error('CORS: requests without an Origin header are not allowed'));
+            }
 
             // In development: allow ALL localhost ports (5173, 5174, 5175, etc.)
-            if (isDev && /^http:\/\/localhost:\d+$/.test(origin)) {
+            if (isDev && /^https?:\/\/localhost:\d+$/.test(origin)) {
                 return callback(null, true);
             }
 
-            // In production: allow specific whitelisted origins
-            const prodOrigins = [
-                process.env.CLIENT_URL,
-                'https://ai-voice-interview.vercel.app',
-            ].filter(Boolean);
-
-            if (prodOrigins.includes(origin)) return callback(null, true);
+            // In production: strict whitelist only
+            if (allowedOrigins.includes(origin)) return callback(null, true);
 
             console.warn(`🚫 CORS blocked origin: ${origin}`);
-            callback(new Error(`CORS: origin ${origin} not allowed`));
+            callback(new Error(`CORS: origin '${origin}' not allowed`));
         },
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
         credentials: true,
+        maxAge: 86400, // Cache preflight for 24 h
     })
 );
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────────
+// General API limiter — 100 requests per 15 minutes per IP
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,   // Return rate-limit info in RateLimit-* headers
+    legacyHeaders: false,
+    message: { success: false, message: 'Too many requests, please try again later.' },
+});
+
+// Stricter limiter for auth endpoints to prevent brute-force
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: 'Too many authentication attempts, please try again later.' },
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -85,10 +120,11 @@ app.use((err, req, res, next) => {
     }
     // LLM errors (invalid key, rate limit, etc.) have a statusCode set
     const statusCode = err.statusCode || err.status || 500;
-    res.status(statusCode).json({
-        success: false,
-        message: err.message || 'Internal server error',
-    });
+    // Never leak internal error details in production
+    const message = isDev
+        ? err.message || 'Internal server error'
+        : statusCode < 500 ? err.message : 'Internal server error';
+    res.status(statusCode).json({ success: false, message });
 });
 
 // 404

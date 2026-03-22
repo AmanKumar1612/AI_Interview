@@ -119,11 +119,9 @@ app.use((err, req, res, next) => {
     }
     // LLM errors (invalid key, rate limit, etc.) have a statusCode set
     const statusCode = err.statusCode || err.status || 500;
-    // Never leak internal error details in production
-    const message = isDev
-        ? err.message || 'Internal server error'
-        : statusCode < 500 ? err.message : 'Internal server error';
-    res.status(statusCode).json({ success: false, message });
+    // Leak error message temporarily to debug Render 500 error
+    const message = err.message || 'Internal server error';
+    res.status(statusCode).json({ success: false, message, stack: err.stack });
 });
 
 // 404

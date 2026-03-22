@@ -31,9 +31,10 @@ app.use(helmet());
 const isDev = (process.env.NODE_ENV || 'development') === 'development';
 
 const allowedOrigins = [
-    process.env.CLIENT_URL,             // set in Render env vars (e.g. https://ai-voice-interview.vercel.app)
+    process.env.CLIENT_URL,             // set in Render env vars
     'https://ai-voice-interview.vercel.app',
-    'https://ai-interview-h12f.onrender.com', // Render backend origin (for same-origin requests)
+    'https://ai-interview-gules-nine.vercel.app',
+    'https://ai-interview-h12f.onrender.com',
 ].filter(Boolean);
 
 app.use(

@@ -31,19 +31,17 @@ app.use(helmet());
 const isDev = (process.env.NODE_ENV || 'development') === 'development';
 
 const allowedOrigins = [
-    ...(isDev ? [] : []),               // dev origins handled via regex below
-    process.env.CLIENT_URL,             // e.g. https://ai-voice-interview.vercel.app
+    process.env.CLIENT_URL,             // set in Render env vars (e.g. https://ai-voice-interview.vercel.app)
     'https://ai-voice-interview.vercel.app',
+    'https://ai-interview-h12f.onrender.com', // Render backend origin (for same-origin requests)
 ].filter(Boolean);
 
 app.use(
     cors({
         origin: (origin, callback) => {
-            // Block no-origin requests in production (server-to-server, scrapers)
-            if (!origin) {
-                if (isDev) return callback(null, true);
-                return callback(new Error('CORS: requests without an Origin header are not allowed'));
-            }
+            // Allow requests with no Origin header (health checks, curl, server-to-server).
+            // These cannot be browser cross-origin attacks — browsers always send Origin.
+            if (!origin) return callback(null, true);
 
             // In development: allow ALL localhost ports (5173, 5174, 5175, etc.)
             if (isDev && /^https?:\/\/localhost:\d+$/.test(origin)) {
